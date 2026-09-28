@@ -65,8 +65,8 @@ we get 2.49, 2.52, 2.55 degrees, hence the average mechanical cost is 2.5 degree
 
 Motor velocity- v_k+1 = v_d + (v_k - v_d) * e^(-dt/0.06)
 
-
-                    ACTUATOR (Flowchart built by claude based on my notes)
+While not 100% accurate the below flow chart is a layman explanation
+                    ACTUATOR
                        │
 u_command ────────────►│
                        ▼
