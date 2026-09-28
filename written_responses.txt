@@ -1,0 +1,116 @@
+### Part A - recover the data (CAN decode)
+
+Frame ID kept:
+
+Signal 1 (u_commanded):  byte position / endianness / signed? / scale / offset:
+Signal 2 (y_measured):   byte position / endianness / signed? / scale / offset:
+
+Notes (anything odd in the logs, how you checked the decode against the PNGs):
+
+
+
+### Part B - identify system
+
+To start this out I think 3 things come out as rather significant looking at the 3 graphs, first the extra gain, second the lag, and 3rd
+the machine backlash which arises due to decreasing and increasing (or reversing), well all of these 3 can easily be conflicted with one another
+so the valid way to move forward is to check the arithmatic presence of each. 
+
+What I can confirm definitely is that the actuator does have a gain in its slop as compared to the corresponding the commanded points, this comes 
+out as 1.3 based on a functional calculation, m = v(output)/u(commanded) where v(output)= d(ymeasured)/dt this comes out to be ~1.3 for all cases, for 
+example at the point of the platue in the deadband graph v(output) is 19.5 and the commanded is 15 hence the gain here becomes 1.3
+
+Test	u_commanded     Measured Velcity 	m
+Step	    +15	        19.50055 	    1.30004
+Reversal	+8	        10.39963 	    1.29995
+Reversal	−8	        −10.39934 	    1.29992
+                                        ~1.3
+
+Lag, looking at the ends of the deadband test there is lag though its kind of hard to detect aside at one end of the spectrum, at the beginning
+there is a lag and towards the point of platue there is some more lag between at 3 where the steering wheel keeps moving for another 0.2 seconds 
+before coming to a stop. This part confused me intially before I parted the time frames properly, putting the explanation short the lag does not
+correspond to a definite interval as expected. So, for the deadband test I found that what I was considering lag was not exactly lag but rather the 
+real world mechanical cost, essentially the actuator actually slowing down rather than halting in a very small dt time, so what I essentially did
+next was try to measure this mechanical cost which came out to be 0.06seconds. the 0.24 seconds decomposition observed in the velocity is essentially 
+equal to a gain of 0.06s addition in the motion at a constant velocity or lag. I will come back to this in a bit for clarities sake.
+
+What I mainly spent time doing was determining whether the lag was seperate from the mechanical cost because the model simply was not sufficing, hence it
+turned out that yes there is some extra cost that is not lag but at the same time it was mixed up with the dynamic lag due to perhaps mechanical cost.
+For u = 2, the final expected velocity according to m = 1.3 is:
+v=1.3*2 = 2.6
+But the measured output initially stays at zero, the first movement occurs at approximately 1.05 seconds after that, it moves.If this were a simple lag,
+we would expect the motor to not move, but the larger commands do move. Instead there is mechanical slack of the transition occuring so for:
+B = v*t
+at +15
+
+Expected velocity: v=1.3*15=19.5
+Output first becomes nonzero at t = 0.195s
+
+at +8
+v=1.3*8=10.4 
+First movement at 0.310s
+
+at +2
+v=1.3*2=2.6
+First movement occurs at 1.050s
+
+If all of that delay were backlash, the approx would be the same
+3.8 degrees for 15, 3.22 for 8, 2.73 for 2
+This shows that there is dynamic lag present, hence observed delay = dynamic lag + backlash
+
+So if we include the dynamic lag (which is approximate to 0.06 when velocity is kept constant) into the consideration we get for the onsets
+B = v(T - 0.6)
+
+we get 2.49, 2.52, 2.55 degrees, hence the average mechanical cost is 2.5 degrees, also to account for the averages and approximation I have given a
+0.1 degree in sensor quantization
+
+Motor velocity- v_k+1 = v_d + (v_k - v_d) * e^(-dt/0.06)
+
+
+                    ACTUATOR (Flowchart built by claude based on my notes)
+                       │
+u_command ────────────►│
+                       ▼
+                 Velocity demand
+                       │
+                       │ K = 1.30
+                       ▼
+                 Motor dynamics
+                 τ ≈ 0.067 s
+                       │
+                       ▼
+                  Motor angle
+                       │
+                       │ backlash ≈ 2.5°
+                       ▼
+                Steering angle
+                       │
+                       │ 0.1° quantization
+                       ▼
+                  y_measured
+
+
+### Part C - control design choices
+
+My control design is based on position error {double error = target - measured;} 
+
+The proportional term provides the primary response to position error. The integral term removes the position error, which is important because 
+the identified actuator has approximately 2.5 degrees of mechanical cost. I measured the derivative term from the measured position rather than
+the from the error since as per the data the target angles can change very suddenly in the case of reversals or jumps up and down.
+
+As for the initial PID gains, i had actually decided to run and check experimentally for what worked but I was running out of time so I provided 
+the code to a LLM and asked it to optimise the gains, hence producing the result you see. 
+The commanded velocity is limited to +/- 15 deg/s since it is with in the range used by actuator in the tests.
+The anti windup is done by the integral since it is bounded down hence it will not push the actuator when it is already over saturated.
+
+
+### Part D - reflection
+
+I'd say that I was hoping to do something more for the mechanical cost or the backlash since it was something that overall would be better implemented
+if I had written a non linear function for it, though due to the gaps and limitation of my knowledge it was a task extremely difficult for me, I did 
+initially try to integrate a similar function on the side of PID but it was getting to complicated (also it would porbably deeped an artificial addition)
+and was frankly useless to the overall accuracy of the plant since the cost was a very well proven parameter
+Which brings me to the tau or the lag which lacks much rigor on my side and could have been established with much more rigour.
+
+Also i was hoping to create a more coherant PID but due to the lack of time it didnt actualise, also I had undertooken AI assistance far too much 
+during it which i feel seriously hampered the overall output and makes the controller section look very sloppy despite it being the relatively 
+simple.
